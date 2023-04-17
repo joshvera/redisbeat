@@ -47,6 +47,7 @@ class RedisScheduler(Scheduler):
         else:
             self.rdb = StrictRedis.from_url(self.schedule_url)
         Scheduler.__init__(self, *args, **kwargs)
+        self.sync_every = kwargs['sync_every']
         app.add_task = partial(self.add, self)
 
         self.multi_node = app.conf.get("redis_multi_node_mode", False)

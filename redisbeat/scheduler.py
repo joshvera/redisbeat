@@ -196,7 +196,7 @@ class RedisScheduler(Scheduler):
             self.adjust(mktime(self.app.now().timetuple()), drift=0.010),
             withscores=True) or []
 
-        next_times = [self.max_interval, ]
+        next_times = []
 
         for task, score in tasks:
             debug("Iterating tasks: %s", task)
@@ -224,12 +224,12 @@ class RedisScheduler(Scheduler):
         next_task = self.rdb.zrangebyscore(self.key, 0, MAXINT, withscores=True, num=1, start=0)
         if not next_task:
             linfo("no next task found")
-            return min(next_times)
+            return min(next_times if len(next_times) > 0 else [self.max_interval])
         encoded = self.fernet.decrypt(force_bytes(next_task[0][0])) if self.fernet else next_task[0][0]
         entry = jsonpickle.decode(encoded)
         next_times.append(self.is_due(entry)[1])
 
-        return min(next_times)
+        return min(next_times if len(next_times) > 0 else [self.max_interval])
 
     def close(self):
         # it would be call after cycle end

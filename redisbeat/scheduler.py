@@ -84,7 +84,8 @@ class RedisScheduler(Scheduler):
             debug("ready to load old_entries: %s", str(task))
             # Don't decrypt old_entries in the scheduler to prevent logging leaks.
             # We don't need it in this method anyway.
-            entry = jsonpickle.decode(task)
+            encoded = self.fernet.decrypt(task) if self.fernet else task
+            entry = jsonpickle.decode(encoded)
             old_entries_dict[entry.name] = (entry, score)
         debug("old_entries: %s", old_entries_dict)
 

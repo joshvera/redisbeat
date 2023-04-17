@@ -4,6 +4,8 @@
 # Licensed under the Apache License, Version 2.0 (the 'License'); you may not
 # use this file except in compliance with the License. You may obtain a copy
 # of the License at http://www.apache.org/licenses/LICENSE-2.0
+import datetime
+from decimal import Decimal
 import sys
 import traceback
 from time import mktime
@@ -30,7 +32,42 @@ try:
 except AttributeError:
     # python3
     MAXINT = sys.maxsize
+_PROTECTED_TYPES = (
+    type(None),
+    int,
+    float,
+    Decimal,
+    datetime.datetime,
+    datetime.date,
+    datetime.time,
+)
 
+
+def is_protected_type(obj):
+    """Determine if the object instance is of a protected type.
+
+    Objects of protected types are preserved as-is when passed to
+    force_str(strings_only=True).
+    """
+    return isinstance(obj, _PROTECTED_TYPES)
+def force_bytes(s, encoding="utf-8", strings_only=False, errors="strict"):
+    """
+    Similar to smart_bytes, except that lazy instances are resolved to
+    strings, rather than kept as lazy objects.
+
+    If strings_only is True, don't convert (some) non-string-like objects.
+    """
+    # Handle the common case first for performance reasons.
+    if isinstance(s, bytes):
+        if encoding == "utf-8":
+            return s
+        else:
+            return s.decode("utf-8", errors).encode(encoding, errors)
+    if strings_only and is_protected_type(s):
+        return s
+    if isinstance(s, memoryview):
+        return bytes(s)
+    return str(s).encode(encoding, errors)
 
 class RedisScheduler(Scheduler):
     fernet: Fernet | None = None
@@ -84,7 +121,7 @@ class RedisScheduler(Scheduler):
             debug("ready to load old_entries: %s", str(task))
             # Don't decrypt old_entries in the scheduler to prevent logging leaks.
             # We don't need it in this method anyway.
-            encoded = self.fernet.decrypt(task) if self.fernet else task
+            encoded = self.fernet.decrypt(force_bytes(task)) if self.fernet else task
             entry = jsonpickle.decode(encoded)
             old_entries_dict[entry.name] = (entry, score)
         debug("old_entries: %s", old_entries_dict)
@@ -100,8 +137,8 @@ class RedisScheduler(Scheduler):
                 del old_entries_dict[key]
 
             # Merge encrypted or encoded json entry into an ordered set of jobs
-            encoded = jsonpickle.encode(e).encode()
-            json = self.fernet.encrypt(encoded) if self.fernet else encoded
+            encoded = jsonpickle.encode(e)
+            json = self.fernet.encrypt(force_bytes(encoded)) if self.fernet else encoded
             self.rdb.zadd(self.key, {json: min(last_run_at, self._when(e, e.is_due()[1]) or 0)})
         debug("old_entries: %s",old_entries_dict)
         for key, tasks in old_entries_dict.items():
@@ -120,7 +157,7 @@ class RedisScheduler(Scheduler):
 
     def add(self, **kwargs):
         e = self.Entry(app=current_app, **kwargs)
-        encoded = jsonpickle.encode(e).encode()
+        encoded = force_bytes(jsonpickle.encode(e))
         json = self.fernet.encrypt(encoded) if self.fernet else encoded
         self.rdb.zadd(self.key, {json: self._when(e, e.is_due()[1]) or 0})
         return True
@@ -128,7 +165,7 @@ class RedisScheduler(Scheduler):
     def remove(self, task_key):
         tasks = self.rdb.zrange(self.key, 0, -1) or []
         for idx, task in enumerate(tasks):
-            encoded = self.fernet.decrypt(task) if self.fernet else task
+            encoded = self.fernet.decrypt(force_bytes(task)) if self.fernet else task
             entry = jsonpickle.decode(encoded)
             if entry.name == task_key:
                 self.rdb.zremrangebyrank(self.key, idx, idx)
@@ -137,12 +174,12 @@ class RedisScheduler(Scheduler):
             return False
 
     def list(self):
-        return [jsonpickle.decode(self.fernet.decrypt(entry) if self.fernet else entry) for entry in self.rdb.zrange(self.key, 0, -1)]
+        return [jsonpickle.decode(self.fernet.decrypt(force_bytes(entry)) if self.fernet else entry) for entry in self.rdb.zrange(self.key, 0, -1)]
 
     def get(self, task_key):
         tasks = self.rdb.zrange(self.key, 0, -1) or []
         for idx, task in enumerate(tasks):
-            encoded = self.fernet.decrypt(task) if self.fernet else task
+            encoded = self.fernet.decrypt(force_bytes(task)) if self.fernet else task
             entry = jsonpickle.decode(encoded)
             if entry.name == task_key:
                 return entry
@@ -158,7 +195,7 @@ class RedisScheduler(Scheduler):
         next_times = [self.max_interval, ]
 
         for task, score in tasks:
-            encoded = self.fernet.decrypt(task) if self.fernet else task
+            encoded = self.fernet.decrypt(force_bytes(task)) if self.fernet else task
             entry = jsonpickle.decode(encoded)
             is_due, next_time_to_run = self.is_due(entry)
 
@@ -174,7 +211,7 @@ class RedisScheduler(Scheduler):
                 else:
                     debug('%s sent. id->%s', entry.task, result.id)
                 self.rdb.zrem(self.key, task)
-                encoded = jsonpickle.encode(next_entry).encode()
+                encoded = force_bytes(jsonpickle.encode(next_entry))
                 next_json = self.fernet.encrypt(encoded) if self.fernet else encoded
                 self.rdb.zadd(self.key, {next_json: self._when(next_entry, next_time_to_run) or 0})
 
@@ -182,7 +219,7 @@ class RedisScheduler(Scheduler):
         if not next_task:
             linfo("no next task found")
             return min(next_times)
-        encoded = self.fernet.decrypt(next_task[0][0]) if self.fernet else next_task[0][0]
+        encoded = self.fernet.decrypt(force_bytes(next_task[0][0])) if self.fernet else next_task[0][0]
         entry = jsonpickle.decode(encoded)
         next_times.append(self.is_due(entry)[1])
 

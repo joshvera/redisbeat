@@ -50,10 +50,6 @@ class RedisScheduler(Scheduler):
         else:
             self.rdb = StrictRedis.from_url(self.schedule_url)
         Scheduler.__init__(self, *args, **kwargs)
-        if kwargs.get('sync_every'):
-            self.sync_every = kwargs['sync_every']
-        if kwargs.get('fernet_key'):
-            self.fernet = Fernet(kwargs['fernet_key'])
         app.add_task = partial(self.add, self)
 
         self.multi_node = app.conf.get("redis_multi_node_mode", False)

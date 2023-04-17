@@ -34,9 +34,9 @@ except AttributeError:
 class RedisScheduler(Scheduler):
     def __init__(self, *args, **kwargs):
         app = kwargs['app']
-        self.key = app.conf.get("CELERY_REDIS_SCHEDULER_KEY",
+        self.key = app.conf.get("redis_scheduler_key",
                                 "celery:beat:order_tasks")
-        self.schedule_url = app.conf.get("CELERY_REDIS_SCHEDULER_URL",
+        self.schedule_url = app.conf.get("redis_scheduler_url",
                                          "redis://localhost:6379")
         # using sentinels
         # supports 'sentinel://:pass@host:port/db

@@ -19,7 +19,7 @@ from redis.exceptions import LockError
 try:
     import urllib.parse as urlparse
 except ImportError:
-    import urlparse
+    from urllib.parse import urlparse
 
 logger = get_logger(__name__)
 debug, linfo, error, warning = (logger.debug, logger.info, logger.error,
@@ -124,7 +124,7 @@ class RedisScheduler(Scheduler):
 
     def list(self):
         return [jsonpickle.decode(entry) for entry in self.rdb.zrange(self.key, 0, -1)]
-    
+
     def get(self, task_key):
         tasks = self.rdb.zrange(self.key, 0, -1) or []
         for idx, task in enumerate(tasks):
@@ -133,7 +133,7 @@ class RedisScheduler(Scheduler):
                 return entry
         else:
             return None
-        
+
     def tick(self):
         tasks = self.rdb.zrangebyscore(
             self.key, 0,

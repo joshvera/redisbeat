@@ -9,6 +9,8 @@ readme = "README.md"
 [tool.poetry.dependencies]
 python = "^3.10"
 jsonpickle = "^3.0.1"
+celery = "^5.2.7"
+redis = {extras = ["sentinel"], version = "^4.5.4"}
 
 
 [build-system]

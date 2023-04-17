@@ -19,7 +19,7 @@ from redis.exceptions import LockError
 try:
     import urllib.parse as urlparse
 except ImportError:
-    import urlparse
+    from urllib.parse import urlparse
 
 logger = get_logger(__name__)
 debug, linfo, error, warning = (logger.debug, logger.info, logger.error,
@@ -34,9 +34,9 @@ except AttributeError:
 class RedisScheduler(Scheduler):
     def __init__(self, *args, **kwargs):
         app = kwargs['app']
-        self.key = app.conf.get("CELERY_REDIS_SCHEDULER_KEY",
+        self.key = app.conf.get("redis_scheduler_key",
                                 "celery:beat:order_tasks")
-        self.schedule_url = app.conf.get("CELERY_REDIS_SCHEDULER_URL",
+        self.schedule_url = app.conf.get("redis_scheduler_url",
                                          "redis://localhost:6379")
         # using sentinels
         # supports 'sentinel://:pass@host:port/db
@@ -92,7 +92,7 @@ class RedisScheduler(Scheduler):
                 last_run_at = old_entries_dict[key][1]
                 del old_entries_dict[key]
             self.rdb.zadd(self.key, {jsonpickle.encode(e): min(last_run_at, self._when(e, e.is_due()[1]) or 0)})
-        debug("old_entries: %s",old_entries_dict))
+        debug("old_entries: %s",old_entries_dict)
         for key, tasks in old_entries_dict.items():
             debug("key: %s", key)
             debug("tasks: %s", tasks)
@@ -124,7 +124,7 @@ class RedisScheduler(Scheduler):
 
     def list(self):
         return [jsonpickle.decode(entry) for entry in self.rdb.zrange(self.key, 0, -1)]
-    
+
     def get(self, task_key):
         tasks = self.rdb.zrange(self.key, 0, -1) or []
         for idx, task in enumerate(tasks):
@@ -133,14 +133,14 @@ class RedisScheduler(Scheduler):
                 return entry
         else:
             return None
-        
+
     def tick(self):
         tasks = self.rdb.zrangebyscore(
             self.key, 0,
             self.adjust(mktime(self.app.now().timetuple()), drift=0.010),
             withscores=True) or []
 
-        next_times = [self.max_interval, ]
+        next_times = []
 
         for task, score in tasks:
             entry = jsonpickle.decode(task)
@@ -163,11 +163,11 @@ class RedisScheduler(Scheduler):
         next_task = self.rdb.zrangebyscore(self.key, 0, MAXINT, withscores=True, num=1, start=0)
         if not next_task:
             linfo("no next task found")
-            return min(next_times)
+            return min(next_times if len(next_times) > 0 else [self.max_interval])
         entry = jsonpickle.decode(next_task[0][0])
         next_times.append(self.is_due(entry)[1])
 
-        return min(next_times)
+        return min(next_times if len(next_times) > 0 else [self.max_interval])
 
     def close(self):
         # it would be call after cycle end

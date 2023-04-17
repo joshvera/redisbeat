@@ -107,7 +107,9 @@ class RedisScheduler(Scheduler):
     def setup_schedule(self):
         # init entries
         self.merge_inplace(self.app.conf.beat_schedule)
-        tasks = [jsonpickle.decode(self.fernet.decrypt(entry) if self.fernet else entry) for entry in self.rdb.zrange(self.key, 0, -1)]
+        all_entries = self.rdb.zrange(self.key, 0, -1)
+        debug("setup_schedule: %s", all_entries)
+        tasks = [jsonpickle.decode(self.fernet.decrypt(entry) if self.fernet else entry) for entry in all_entries]
         linfo('Current schedule:\n' + '\n'.join(
               str('task: ' + entry.task + '; each: ' + repr(entry.schedule))
               for entry in tasks))
@@ -138,13 +140,15 @@ class RedisScheduler(Scheduler):
 
             # Merge encrypted or encoded json entry into an ordered set of jobs
             encoded = jsonpickle.encode(e)
-            json = self.fernet.encrypt(force_bytes(encoded)) if self.fernet else encoded
+            json = self.fernet.encrypt(encoded.encode()) if self.fernet else encoded
             self.rdb.zadd(self.key, {json: min(last_run_at, self._when(e, e.is_due()[1]) or 0)})
         debug("old_entries: %s",old_entries_dict)
         for key, tasks in old_entries_dict.items():
             debug("key: %s", key)
             debug("tasks: %s", tasks)
-            debug("zadd: %s", self.rdb.zadd(self.key, {jsonpickle.encode(tasks[0]): tasks[1]}))
+            encoded = jsonpickle.encode(tasks[0])
+            json = self.fernet.encrypt(encoded.encode()) if self.fernet else encoded
+            debug("zadd: %s", self.rdb.zadd(self.key, {json: tasks[1]}))
         debug(self.rdb.zrange(self.key, 0, -1))
 
     def is_due(self, entry):

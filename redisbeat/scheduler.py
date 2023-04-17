@@ -195,8 +195,7 @@ class RedisScheduler(Scheduler):
         next_times = [self.max_interval, ]
 
         for task, score in tasks:
-            encoded = self.fernet.decrypt(force_bytes(task)) if self.fernet else task
-            entry = jsonpickle.decode(encoded)
+            entry = jsonpickle.decode(task)
             is_due, next_time_to_run = self.is_due(entry)
 
             next_times.append(next_time_to_run)
@@ -212,8 +211,7 @@ class RedisScheduler(Scheduler):
                     debug('%s sent. id->%s', entry.task, result.id)
                 self.rdb.zrem(self.key, task)
                 encoded = force_bytes(jsonpickle.encode(next_entry))
-                next_json = self.fernet.encrypt(encoded) if self.fernet else encoded
-                self.rdb.zadd(self.key, {next_json: self._when(next_entry, next_time_to_run) or 0})
+                self.rdb.zadd(self.key, {encoded: self._when(next_entry, next_time_to_run) or 0})
 
         next_task = self.rdb.zrangebyscore(self.key, 0, MAXINT, withscores=True, num=1, start=0)
         if not next_task:

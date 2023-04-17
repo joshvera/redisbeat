@@ -1,0 +1,16 @@
+[tool.poetry]
+name = "redisbeat"
+version = "0.1.0"
+description = ""
+authors = ["Liqiang Liu <liqianglau@outlook.com>"]
+license = "MIT"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.10"
+jsonpickle = "^3.0.1"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

@@ -20,6 +20,7 @@ try:
     import urllib.parse as urlparse
 except ImportError:
     from urllib.parse import urlparse
+from cryptography.fernet import Fernet
 
 logger = get_logger(__name__)
 debug, linfo, error, warning = (logger.debug, logger.info, logger.error,
@@ -32,6 +33,8 @@ except AttributeError:
 
 
 class RedisScheduler(Scheduler):
+    fernet: Fernet | None = None
+
     def __init__(self, *args, **kwargs):
         app = kwargs['app']
 
@@ -43,12 +46,14 @@ class RedisScheduler(Scheduler):
         # supports 'sentinel://:pass@host:port/db
         if self.schedule_url.startswith('sentinel://'):
             self.broker_transport_options = app.conf.broker_transport_options
-            self.rdb = self.sentinel_connect(broker_transport_options.get("master_name", "mymaster"))
+            self.rdb = self.sentinel_connect(self.broker_transport_options.get("master_name", "mymaster"))
         else:
             self.rdb = StrictRedis.from_url(self.schedule_url)
         Scheduler.__init__(self, *args, **kwargs)
         if kwargs.get('sync_every'):
             self.sync_every = kwargs['sync_every']
+        if kwargs.get('fernet_key'):
+            self.fernet = Fernet(kwargs['fernet_key'])
         app.add_task = partial(self.add, self)
 
         self.multi_node = app.conf.get("redis_multi_node_mode", False)
@@ -69,7 +74,7 @@ class RedisScheduler(Scheduler):
     def setup_schedule(self):
         # init entries
         self.merge_inplace(self.app.conf.beat_schedule)
-        tasks = [jsonpickle.decode(entry) for entry in self.rdb.zrange(self.key, 0, -1)]
+        tasks = [jsonpickle.decode(self.fernet.decrypt(entry) if self.fernet else entry) for entry in self.rdb.zrange(self.key, 0, -1)]
         linfo('Current schedule:\n' + '\n'.join(
               str('task: ' + entry.task + '; each: ' + repr(entry.schedule))
               for entry in tasks))
@@ -81,6 +86,8 @@ class RedisScheduler(Scheduler):
             if not task:
                 break
             debug("ready to load old_entries: %s", str(task))
+            # Don't decrypt old_entries in the scheduler to prevent logging leaks.
+            # We don't need it in this method anyway.
             entry = jsonpickle.decode(task)
             old_entries_dict[entry.name] = (entry, score)
         debug("old_entries: %s", old_entries_dict)
@@ -94,7 +101,11 @@ class RedisScheduler(Scheduler):
                 # replace entry and remain old score
                 last_run_at = old_entries_dict[key][1]
                 del old_entries_dict[key]
-            self.rdb.zadd(self.key, {jsonpickle.encode(e): min(last_run_at, self._when(e, e.is_due()[1]) or 0)})
+
+            # Merge encrypted or encoded json entry into an ordered set of jobs
+            encoded = jsonpickle.encode(e)
+            json = self.fernet.encrypt(encoded) if self.fernet else encoded
+            self.rdb.zadd(self.key, {json: min(last_run_at, self._when(e, e.is_due()[1]) or 0)})
         debug("old_entries: %s",old_entries_dict)
         for key, tasks in old_entries_dict.items():
             debug("key: %s", key)
@@ -112,13 +123,17 @@ class RedisScheduler(Scheduler):
 
     def add(self, **kwargs):
         e = self.Entry(app=current_app, **kwargs)
-        self.rdb.zadd(self.key, {jsonpickle.encode(e): self._when(e, e.is_due()[1]) or 0})
+        encoded = jsonpickle.encode(e)
+        encrypted = self.fernet.encrypt(encoded) if self.fernet else None
+        json = encrypted if self.fernet else encoded
+        self.rdb.zadd(self.key, {json: self._when(e, e.is_due()[1]) or 0})
         return True
 
     def remove(self, task_key):
         tasks = self.rdb.zrange(self.key, 0, -1) or []
         for idx, task in enumerate(tasks):
-            entry = jsonpickle.decode(task)
+            encoded = self.fernet.decrypt(task) if self.fernet else task
+            entry = jsonpickle.decode(encoded)
             if entry.name == task_key:
                 self.rdb.zremrangebyrank(self.key, idx, idx)
                 return True
@@ -126,12 +141,13 @@ class RedisScheduler(Scheduler):
             return False
 
     def list(self):
-        return [jsonpickle.decode(entry) for entry in self.rdb.zrange(self.key, 0, -1)]
+        return [jsonpickle.decode(self.fernet.decrypt(entry) if self.fernet else entry) for entry in self.rdb.zrange(self.key, 0, -1)]
 
     def get(self, task_key):
         tasks = self.rdb.zrange(self.key, 0, -1) or []
         for idx, task in enumerate(tasks):
-            entry = jsonpickle.decode(task)
+            encoded = self.fernet.decrypt(task) if self.fernet else task
+            entry = jsonpickle.decode(encoded)
             if entry.name == task_key:
                 return entry
         else:
@@ -146,7 +162,8 @@ class RedisScheduler(Scheduler):
         next_times = [self.max_interval, ]
 
         for task, score in tasks:
-            entry = jsonpickle.decode(task)
+            encoded = self.fernet.decrypt(task) if self.fernet else task
+            entry = jsonpickle.decode(encoded)
             is_due, next_time_to_run = self.is_due(entry)
 
             next_times.append(next_time_to_run)
@@ -161,13 +178,15 @@ class RedisScheduler(Scheduler):
                 else:
                     debug('%s sent. id->%s', entry.task, result.id)
                 self.rdb.zrem(self.key, task)
-                self.rdb.zadd(self.key, {jsonpickle.encode(next_entry): self._when(next_entry, next_time_to_run) or 0})
+                next_encoded = jsonpickle.encode(self.fernet.encrypt(next_entry) if self.fernet else next_entry)
+                self.rdb.zadd(self.key, {next_encoded: self._when(next_entry, next_time_to_run) or 0})
 
         next_task = self.rdb.zrangebyscore(self.key, 0, MAXINT, withscores=True, num=1, start=0)
         if not next_task:
             linfo("no next task found")
             return min(next_times)
-        entry = jsonpickle.decode(next_task[0][0])
+        encoded = self.fernet.decrypt(next_task[0][0]) if self.fernet else next_task[0][0]
+        entry = jsonpickle.decode(encoded)
         next_times.append(self.is_due(entry)[1])
 
         return min(next_times)

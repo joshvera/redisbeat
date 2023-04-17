@@ -99,7 +99,7 @@ class RedisScheduler(Scheduler):
                 del old_entries_dict[key]
 
             # Merge encrypted or encoded json entry into an ordered set of jobs
-            encoded = jsonpickle.encode(e)
+            encoded = jsonpickle.encode(e).encode()
             json = self.fernet.encrypt(encoded) if self.fernet else encoded
             self.rdb.zadd(self.key, {json: min(last_run_at, self._when(e, e.is_due()[1]) or 0)})
         debug("old_entries: %s",old_entries_dict)
@@ -119,9 +119,8 @@ class RedisScheduler(Scheduler):
 
     def add(self, **kwargs):
         e = self.Entry(app=current_app, **kwargs)
-        encoded = jsonpickle.encode(e)
-        encrypted = self.fernet.encrypt(encoded) if self.fernet else None
-        json = encrypted if self.fernet else encoded
+        encoded = jsonpickle.encode(e).encode()
+        json = self.fernet.encrypt(encoded) if self.fernet else encoded
         self.rdb.zadd(self.key, {json: self._when(e, e.is_due()[1]) or 0})
         return True
 
@@ -174,8 +173,9 @@ class RedisScheduler(Scheduler):
                 else:
                     debug('%s sent. id->%s', entry.task, result.id)
                 self.rdb.zrem(self.key, task)
-                next_encoded = jsonpickle.encode(self.fernet.encrypt(next_entry) if self.fernet else next_entry)
-                self.rdb.zadd(self.key, {next_encoded: self._when(next_entry, next_time_to_run) or 0})
+                encoded = jsonpickle.encode(next_entry).encode()
+                next_json = self.fernet.encrypt(encoded) if self.fernet else encoded
+                self.rdb.zadd(self.key, {next_json: self._when(next_entry, next_time_to_run) or 0})
 
         next_task = self.rdb.zrangebyscore(self.key, 0, MAXINT, withscores=True, num=1, start=0)
         if not next_task:

@@ -107,7 +107,7 @@ class RedisScheduler(Scheduler):
     def setup_schedule(self):
         # init entries
         self.merge_inplace(self.app.conf.beat_schedule)
-        tasks = [jsonpickle.decode(self.fernet.decrypt(entry) if self.fernet else entry) for entry in self.rdb.zrange(self.key, 0, -1)]
+        tasks = [jsonpickle.decode(self.fernet.decrypt(force_bytes(entry)) if self.fernet else entry) for entry in self.rdb.zrange(self.key, 0, -1)]
         linfo('Current schedule:\n' + '\n'.join(
               str('task: ' + entry.task + '; each: ' + repr(entry.schedule))
               for entry in tasks))

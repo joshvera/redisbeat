@@ -107,7 +107,7 @@ class RedisScheduler(Scheduler):
     def setup_schedule(self):
         # init entries
         self.merge_inplace(self.app.conf.beat_schedule)
-        tasks = [jsonpickle.decode(self.fernet.decrypt(force_bytes(jsonpickle.decode(entry))) if self.fernet else entry) for entry in self.rdb.zrange(self.key, 0, -1)]
+        tasks = [jsonpickle.decode(entry) for entry in self.rdb.zrange(self.key, 0, -1)]
         linfo('Current schedule:\n' + '\n'.join(
               str('task: ' + entry.task + '; each: ' + repr(entry.schedule))
               for entry in tasks))
@@ -118,13 +118,13 @@ class RedisScheduler(Scheduler):
         for task, score in old_entries:
             if not task:
                 break
-            print("ready to load old_entries: %s", str(task))
+            debug("ready to load old_entries: %s", str(task))
             # Don't decrypt old_entries in the scheduler to prevent logging leaks.
             # We don't need it in this method anyway.
             encoded = self.fernet.decrypt(force_bytes(task)) if self.fernet else task
             entry = jsonpickle.decode(encoded)
             old_entries_dict[entry.name] = (entry, score)
-        print("old_entries: %s", old_entries_dict)
+        debug("old_entries: %s", old_entries_dict)
 
         self.rdb.delete(self.key)
 

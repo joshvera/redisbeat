@@ -199,6 +199,7 @@ class RedisScheduler(Scheduler):
         next_times = [self.max_interval, ]
 
         for task, score in tasks:
+            task = self.fernet.decrypt(task.decode()) if self.fernet else task
             entry = jsonpickle.decode(task)
             is_due, next_time_to_run = self.is_due(entry)
 

@@ -118,13 +118,13 @@ class RedisScheduler(Scheduler):
         for task, score in old_entries:
             if not task:
                 break
-            debug("ready to load old_entries: %s", str(task))
+            print("ready to load old_entries: %s", str(task))
             # Don't decrypt old_entries in the scheduler to prevent logging leaks.
             # We don't need it in this method anyway.
             encoded = self.fernet.decrypt(force_bytes(task)) if self.fernet else task
             entry = jsonpickle.decode(encoded)
             old_entries_dict[entry.name] = (entry, score)
-        debug("old_entries: %s", old_entries_dict)
+        print("old_entries: %s", old_entries_dict)
 
         self.rdb.delete(self.key)
 
@@ -166,7 +166,7 @@ class RedisScheduler(Scheduler):
         tasks = self.rdb.zrange(self.key, 0, -1) or []
         for idx, task in enumerate(tasks):
             encoded = self.fernet.decrypt(force_bytes(task)) if self.fernet else task
-            entry = jsonpickle.decode(encoded)
+            entry = encoded.decode()
             if entry.name == task_key:
                 self.rdb.zremrangebyrank(self.key, idx, idx)
                 return True

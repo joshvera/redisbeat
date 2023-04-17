@@ -137,8 +137,6 @@ class RedisScheduler(Scheduler):
             return None
 
     def tick(self):
-        super().tick()
-
         tasks = self.rdb.zrangebyscore(
             self.key, 0,
             self.adjust(mktime(self.app.now().timetuple()), drift=0.010),
